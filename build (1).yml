@@ -1,0 +1,379 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Crear proyecto Android
+        run: |
+          set -e
+          mkdir -p PlayGoApp && cd PlayGoApp
+
+          mkdir -p "$(dirname settings.gradle.kts)"
+          cat > settings.gradle.kts <<'PLAYGO_EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "PlayGo"
+          include(":app")
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname build.gradle.kts)"
+          cat > build.gradle.kts <<'PLAYGO_EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname gradle.properties)"
+          cat > gradle.properties <<'PLAYGO_EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          kotlin.code.style=official
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/build.gradle.kts)"
+          cat > app/build.gradle.kts <<'PLAYGO_EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "pe.playgo.app"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "pe.playgo.app"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("androidx.activity:activity-ktx:1.9.0")
+          }
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/src/main/AndroidManifest.xml)"
+          cat > app/src/main/AndroidManifest.xml <<'PLAYGO_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+              <application
+                  android:allowBackup="true"
+                  android:hardwareAccelerated="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="@string/app_name"
+                  android:theme="@style/Theme.PlayGo"
+                  android:usesCleartextTraffic="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode"
+                      android:screenOrientation="unspecified">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/src/main/java/pe/playgo/app/MainActivity.kt)"
+          cat > app/src/main/java/pe/playgo/app/MainActivity.kt <<'PLAYGO_EOF'
+          package pe.playgo.app
+
+          import android.annotation.SuppressLint
+          import android.content.Intent
+          import android.graphics.Color
+          import android.net.Uri
+          import android.os.Bundle
+          import android.view.View
+          import android.view.ViewGroup
+          import android.webkit.CookieManager
+          import android.webkit.WebChromeClient
+          import android.webkit.WebResourceError
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebSettings
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import android.widget.FrameLayout
+          import androidx.activity.OnBackPressedCallback
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.view.WindowCompat
+          import androidx.core.view.WindowInsetsCompat
+          import androidx.core.view.WindowInsetsControllerCompat
+
+          class MainActivity : AppCompatActivity() {
+
+              // >>> Cambia aquí la URL de inicio de tu app <<<
+              private val startUrl = "https://playgo.pe/player/home.php"
+              private val allowedHost = "playgo.pe"
+
+              private lateinit var root: FrameLayout
+              private lateinit var webView: WebView
+              private var customView: View? = null
+              private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+
+              @SuppressLint("SetJavaScriptEnabled")
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+                  webView = WebView(this).apply {
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                      setBackgroundColor(Color.BLACK)
+                      keepScreenOn = true
+                  }
+                  root.addView(webView)
+                  setContentView(root)
+
+                  with(webView.settings) {
+                      javaScriptEnabled = true
+                      domStorageEnabled = true
+                      mediaPlaybackRequiresUserGesture = false
+                      loadWithOverviewMode = true
+                      useWideViewPort = true
+                      mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                      cacheMode = WebSettings.LOAD_DEFAULT
+                  }
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+
+                  webView.webViewClient = object : WebViewClient() {
+                      override fun shouldOverrideUrlLoading(
+                          view: WebView,
+                          request: WebResourceRequest
+                      ): Boolean {
+                          val host = request.url.host ?: return false
+                          if (!request.isForMainFrame) return false
+                          if (host == allowedHost || host.endsWith(".$allowedHost")) return false
+                          // Enlaces externos se abren en el navegador
+                          startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                          return true
+                      }
+
+                      override fun onReceivedError(
+                          view: WebView,
+                          request: WebResourceRequest,
+                          error: WebResourceError
+                      ) {
+                          if (request.isForMainFrame) {
+                              view.loadDataWithBaseURL(
+                                  null,
+                                  errorHtml(),
+                                  "text/html",
+                                  "UTF-8",
+                                  null
+                              )
+                          }
+                      }
+                  }
+
+                  webView.webChromeClient = object : WebChromeClient() {
+                      override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                          if (customView != null) {
+                              callback.onCustomViewHidden()
+                              return
+                          }
+                          customView = view
+                          customViewCallback = callback
+                          webView.visibility = View.GONE
+                          root.addView(
+                              view,
+                              FrameLayout.LayoutParams(
+                                  ViewGroup.LayoutParams.MATCH_PARENT,
+                                  ViewGroup.LayoutParams.MATCH_PARENT
+                              )
+                          )
+                          applyFullscreen(true)
+                      }
+
+                      override fun onHideCustomView() {
+                          customView?.let { root.removeView(it) }
+                          customView = null
+                          customViewCallback?.onCustomViewHidden()
+                          customViewCallback = null
+                          webView.visibility = View.VISIBLE
+                          applyFullscreen(false)
+                      }
+                  }
+
+                  onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                      override fun handleOnBackPressed() {
+                          when {
+                              customView != null -> webView.webChromeClient?.onHideCustomView()
+                              webView.canGoBack() -> webView.goBack()
+                              else -> {
+                                  isEnabled = false
+                                  onBackPressedDispatcher.onBackPressed()
+                              }
+                          }
+                      }
+                  })
+
+                  if (savedInstanceState != null) {
+                      webView.restoreState(savedInstanceState)
+                  } else {
+                      webView.loadUrl(startUrl)
+                  }
+              }
+
+              private fun applyFullscreen(enable: Boolean) {
+                  WindowCompat.setDecorFitsSystemWindows(window, !enable)
+                  val controller = WindowInsetsControllerCompat(window, window.decorView)
+                  if (enable) {
+                      controller.systemBarsBehavior =
+                          WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                      controller.hide(WindowInsetsCompat.Type.systemBars())
+                  } else {
+                      controller.show(WindowInsetsCompat.Type.systemBars())
+                  }
+              }
+
+              private fun errorHtml() = """
+                  <html><body style="background:#0f172a;color:#fff;font-family:sans-serif;
+                  display:flex;flex-direction:column;align-items:center;justify-content:center;
+                  height:100vh;margin:0;text-align:center">
+                  <h2>Sin conexión</h2>
+                  <p>Revisa tu internet e inténtalo de nuevo.</p>
+                  <a href="$startUrl" style="background:#e11d48;color:#fff;padding:12px 28px;
+                  border-radius:8px;text-decoration:none">Reintentar</a>
+                  </body></html>
+              """.trimIndent()
+
+              override fun onSaveInstanceState(outState: Bundle) {
+                  super.onSaveInstanceState(outState)
+                  webView.saveState(outState)
+              }
+
+              override fun onPause() { webView.onPause(); super.onPause() }
+              override fun onResume() { super.onResume(); webView.onResume() }
+
+              override fun onDestroy() {
+                  root.removeAllViews()
+                  webView.destroy()
+                  super.onDestroy()
+              }
+          }
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/src/main/res/values/strings.xml)"
+          cat > app/src/main/res/values/strings.xml <<'PLAYGO_EOF'
+          <resources>
+              <string name="app_name">PLAYGO</string>
+          </resources>
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/src/main/res/values/colors.xml)"
+          cat > app/src/main/res/values/colors.xml <<'PLAYGO_EOF'
+          <resources>
+              <color name="ic_background">#E11D48</color>
+              <color name="black">#000000</color>
+          </resources>
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/src/main/res/values/themes.xml)"
+          cat > app/src/main/res/values/themes.xml <<'PLAYGO_EOF'
+          <resources>
+              <style name="Theme.PlayGo" parent="Theme.AppCompat.DayNight.NoActionBar">
+                  <item name="android:statusBarColor">@color/black</item>
+                  <item name="android:navigationBarColor">@color/black</item>
+                  <item name="android:windowBackground">@color/black</item>
+              </style>
+          </resources>
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/src/main/res/drawable/ic_launcher_foreground.xml)"
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'PLAYGO_EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M42,32 L42,76 L78,54 Z" />
+          </vector>
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml)"
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'PLAYGO_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          PLAYGO_EOF
+
+          mkdir -p "$(dirname app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml)"
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml <<'PLAYGO_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          PLAYGO_EOF
+
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Compilar APK
+        working-directory: PlayGoApp
+        run: gradle assembleDebug --no-daemon
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PLAYGO-apk
+          path: PlayGoApp/app/build/outputs/apk/debug/app-debug.apk
